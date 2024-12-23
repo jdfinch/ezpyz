@@ -34,15 +34,9 @@ from ezpyzy.shush import shush
 from ezpyzy.singleton import Singleton, SingletonMeta
 from ezpyzy.sort import sort
 from ezpyzy.subproc import subproc
+from ezpyzy.table import Table, Column, Row, Col
 from ezpyzy.timer import Timer
 
-from ezpyzy.table import Table, Column, IDColumn
-ColStr = T.Union[Column[str], str, None]
-ColInt = T.Union[Column[int], int, None]
-ColBool = T.Union[Column[bool], bool, None]
-ColFloat = T.Union[Column[float], float, None]
-ColObj = T.Union[Column[T.Any], T.Any, None]
-ColID = T.Union[IDColumn[str], str, None]
 
 import dataclasses
 Def: None = lambda x: dataclasses.field(  # noqa
