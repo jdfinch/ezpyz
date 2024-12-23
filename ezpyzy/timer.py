@@ -170,7 +170,7 @@ class Timer:
     def __enter__(self):
         self.entered = True
         if self.label:
-            print(self.label, end='... ')
+            print('⏱', self.label, end='... ')
         return self
 
     def __exit__(self, exc_type=None, exc_val=None, exc_tb=None):
@@ -178,9 +178,9 @@ class Timer:
         self.delta = TimeDelta(self.end - self.start)
         if self.label:
             if self.entered:
-                print(self.elapsed.display())
+                print(self.elapsed.display(), '🏁')
             else:
-                print(f'{self.label}: {self.elapsed.display()}')
+                print(f'{self.label}: {self.elapsed.display()}', '🏁')
 
     def stop(self):
         self.__exit__()

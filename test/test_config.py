@@ -1,8 +1,12 @@
 
-from ezpyzy.config import Config, MultiConfig, Implementation
+
+
+from ezpyzy.config import Config, MultiConfig, ImplementsConfig
 import ezpyzy as ez
 import dataclasses as dc
 import textwrap as tw
+
+import typing as T
 
 
 with ez.test("Define Config", crash=True):
@@ -20,7 +24,7 @@ with ez.test("Construct Config"):
     assert train_config_b.epochs == 2
     assert train_config_b.tags == ['training']
 
-with ez.test("Evolve Config", crash=True):
+with ez.test("Evolve Config"):
     train_config_c = Training(train_config_a, tags=['training', 'new'])
     assert train_config_c.shuffle == False
     assert train_config_c.epochs == 1
@@ -34,7 +38,7 @@ with ez.test("Evolve Mutated Config"):
     assert train_config_d.tags == ['training', 'new']
 
 with ez.test("Merge Configs"):
-    train_config_e = train_config_d & train_config_b
+    train_config_e = train_config_d ^ train_config_b
     assert train_config_e.shuffle == False
     assert train_config_e.epochs == 2
     assert train_config_e.tags == ['training', 'new']
@@ -86,18 +90,12 @@ with ez.test("Evolve Nested Config"):
 
 with ez.test("Serialize All"):
     serial_all = exp_config_a.configured.json()
-
-with ez.test("Serialize Configured Only, No Subconfigs"):
-    serial_configured = exp_config_a.configured.configured.json()
-    assert serial_configured == tw.dedent('''
-    {
-      "name": "exp1"
-    }
-    ''').strip()
+    deserial_all = Experiment(serial_all)
+    assert deserial_all == exp_config_a
 
 with ez.test("Serialize Configured Only With Subconfigs"):
-    serial_configured_and_subconfigs = exp_config_a.configured.and_subconfigs.json()
-    assert serial_configured_and_subconfigs == tw.dedent('''
+    serial_configured = exp_config_a.configured.configured.json()
+    assert serial_configured == tw.dedent('''
     {
       "name": "exp1",
       "training": {
@@ -106,52 +104,50 @@ with ez.test("Serialize Configured Only With Subconfigs"):
     }
     ''').strip()
 
-with ez.test("Serialize Configured and Unconfigured, No Subconfigs"):
-    serial_no_subconfigs = exp_config_a.configured.and_unconfigured.json()
-    assert serial_no_subconfigs == tw.dedent('''
+with ez.test("Serialize Configured and Unconfigured, No Class Info"):
+    serial_all_no_cls = exp_config_a.configured.and_unconfigured.json()
+    assert serial_all_no_cls == tw.dedent('''
     {
       "name": "exp1",
+      "training": {
+        "shuffle": true,
+        "epochs": 5,
+        "tags": [
+          "training"
+        ]
+      },
       "metrics": [
         "accuracy"
       ]
     }
     ''').strip()
 
-with ez.test("Load Configured Only, No Subconfigs"):
+with ez.test("Load Configured Only"):
     exp_config_c = Experiment(serial_configured,
         training=Training(shuffle=False), metrics=['p', 'r', 'f1'])
     assert exp_config_c.name == 'exp1'
     assert exp_config_c.training.shuffle == False
-    assert exp_config_c.training.epochs == 1
+    assert exp_config_c.training.epochs == 5
     assert exp_config_c.training.tags == ['training']
     assert exp_config_c.metrics == ['p', 'r', 'f1']
-
-with ez.test("Load Configured Only With Subconfigs"):
-    exp_config_d = Experiment(serial_configured_and_subconfigs,
-        training=Training(shuffle=False), metrics=['p', 'r', 'f1'])
-    assert exp_config_d.name == 'exp1'
-    assert exp_config_d.training.shuffle == False
-    assert exp_config_d.training.epochs == 5
-    assert exp_config_d.training.tags == ['training']
-    assert exp_config_d.metrics == ['p', 'r', 'f1']
 
 with ez.test("Merge Nested Configs"):
     exp_config_e = Experiment(
         name='exp_e', training=Training(shuffle=False, epochs=6))
     exp_config_f = Experiment(
         name='exp_f', training=Training(shuffle=True, tags=['f']), metrics=['f1'])
-    exp_config_g = exp_config_e & exp_config_f
+    exp_config_g = exp_config_e >> exp_config_f
     assert exp_config_g == Experiment(
         name='exp_f', training=Training(shuffle=True, epochs=6, tags=['f']), metrics=['f1'])
-    exp_config_h = exp_config_f & exp_config_e
+    exp_config_h = exp_config_f >> exp_config_e
     assert exp_config_h == Experiment(
         name='exp_e', training=Training(shuffle=False, epochs=6, tags=['f']), metrics=['f1'])
 
 with ez.test("Merge Nested Configs, No Override"):
-    exp_config_i = exp_config_e * exp_config_f
+    exp_config_i = exp_config_e ^ exp_config_f
     assert exp_config_i == Experiment(
         name='exp_e', training=Training(shuffle=False, epochs=6, tags=['f']), metrics=['f1'])
-    exp_config_j = exp_config_f * exp_config_e
+    exp_config_j = exp_config_f ^ exp_config_e
     assert exp_config_j == Experiment(
         name='exp_f', training=Training(shuffle=True, epochs=6, tags=['f']), metrics=['f1'])
 
@@ -203,39 +199,47 @@ with ez.test("Inherit and Extend Nested Config with Overrides"):
 
 with ez.test("Define Multiple Subconfigs with Config dict"):
     @dc.dataclass
+    class TrainingStages(Config):
+        finetuning: Training = Training(epochs=3)
+
+    @dc.dataclass
+    class IHaveTwoTrainingStages(TrainingStages):
+        pretraining: Training = Training(shuffle=False)
+        refinement: Training = Training(epochs=9)
+
+    @dc.dataclass
     class MultipleTraining(Config):
         groupname: str = None
-        stages: MultiConfig[Training] = MultiConfig(
-            pretraining=Training(shuffle=False),
-            finetuning=Training(epochs=3),
-        )
+        stages: TrainingStages = IHaveTwoTrainingStages()
         metrics: list[str] = ['accuracy']
 
 with ez.test("Construct Multiple Subconfigs"):
     multi_train_a = MultipleTraining(groupname='multi_a')
+    with multi_train_a.stages.configured.configuring():
+        multi_train_a.stages.last_stage = Training(epochs=99)
     assert multi_train_a.groupname == 'multi_a'
-    assert multi_train_a.stages['pretraining'].shuffle == False
-    assert multi_train_a.stages['pretraining'].epochs == 1
-    assert multi_train_a.stages['pretraining'].tags == ['training']
-    assert multi_train_a.stages['finetuning'].shuffle == True
-    assert multi_train_a.stages['finetuning'].epochs == 3
-    assert multi_train_a.stages['finetuning'].tags == ['training']
-    assert multi_train_a.metrics == ['accuracy']
+    assert dict(multi_train_a.stages) == {
+        'finetuning': Training(epochs=3),
+        'pretraining': Training(shuffle=False),
+        'refinement': Training(epochs=9),
+        'last_stage': Training(epochs=99),
+    }
 
-with ez.test("Evolve Multiple Subconfigs"):
-    multi_train_b = MultipleTraining(multi_train_a,
-        stages=MultiConfig(finetuning=Training(tags=['ft'])))
-    assert multi_train_b.groupname == 'multi_a'
-    assert multi_train_b.stages['pretraining'].shuffle == False
-    assert multi_train_b.stages['pretraining'].epochs == 1
-    assert multi_train_b.stages['pretraining'].tags == ['training']
-    assert multi_train_b.stages['finetuning'].shuffle == True
-    assert multi_train_b.stages['finetuning'].epochs == 3
-    assert multi_train_b.stages['finetuning'].tags == ['ft']
+with ez.test("Define Multiple Subconfigs Without New Class"):
+    multi_training = TrainingStages()(
+        pretraining=Training(epochs=4),
+        refinement=Training(epochs=10),
+    )
+    assert dict(multi_training) == {
+        'finetuning': Training(epochs=3),
+        'pretraining': Training(epochs=4),
+        'refinement': Training(epochs=10),
+    }
+
 
 with ez.test("Define a Config Implementation"):
     @dc.dataclass
-    class ActuallyTrain(Implementation, Training):
+    class ActuallyTrain(ImplementsConfig, Training):
         n_processes: int = 1
         def __post_init__(self):
             super().__post_init__()
@@ -244,11 +248,11 @@ with ez.test("Define a Config Implementation"):
     assert Training.__implementation__ is ActuallyTrain
 
 with ez.test("Construct Implementation"):
-    actually_train_a = ActuallyTrain(epochs=5)
+    actually_train_a = ActuallyTrain(n_processes=2, epochs=5)
     assert actually_train_a.shuffle == True
     assert actually_train_a.epochs == 5
     assert actually_train_a.tags == ['training']
-    assert actually_train_a.n_processes == 1
+    assert actually_train_a.n_processes == 2
     assert actually_train_a.epochs_run == list(range(5))
 
 with ez.test("Save Implementation and Load as Config Only"):
@@ -258,6 +262,90 @@ with ez.test("Save Implementation and Load as Config Only"):
     assert config_only.epochs == 5
     assert config_only.tags == ['training']
     assert not hasattr(config_only, 'n_processes')
+
+with ez.test("Alternative Config: Strategy Override", crash=True):
+
+    @dc.dataclass
+    class Decoding(Config):
+        name: str = None
+        def __post_init__(self):
+            super().__post_init__()
+            with self.configured.configuring():
+                self.name = self.__class__.__name__
+
+    @dc.dataclass
+    class BeamDecoding(Decoding):
+        k: int = 5
+
+    @dc.dataclass
+    class NoRepeatDecoding(Decoding):
+        alpha: float = 0.6
+
+    @dc.dataclass
+    class Model(Config):
+        max_out: int = 16
+        decoding: T.Union[BeamDecoding, NoRepeatDecoding] = BeamDecoding()
+
+    model_a = Model(max_out=3)
+    assert model_a.decoding.name == 'BeamDecoding'
+    assert model_a.decoding.k == 5
+    model_b = Model(decoding=NoRepeatDecoding(alpha=0.7))
+    assert model_b.decoding.name == 'NoRepeatDecoding'
+    assert model_b.decoding.alpha == 0.7
+    model_a <<= model_b
+    assert isinstance(model_a.decoding, NoRepeatDecoding)
+    assert model_a.decoding.name == 'NoRepeatDecoding'
+    assert model_a.decoding.alpha == 0.7
+
+
+with ez.test("Test Setters"):
+    @dc.dataclass
+    class Generator(ez.Config):
+        name: str = 'gen'
+        actual_batch_size: int = 1
+        gas: int = 1
+        effective_batch_size: int = 16
+
+        def _set_actual_batch_size(self, batch_size):
+            if not self.configured:
+                if self.configured.has.gas and not self.configured.has.actual_batch_size:
+                    return self.effective_batch_size // self.gas
+                elif self.configured.has.actual_batch_size and not self.configured.has.gas:
+                    self._gas = self.effective_batch_size // batch_size
+                return batch_size
+            else:
+                self._gas = self.effective_batch_size // batch_size
+                return batch_size
+
+        def _set_gas(self, gas):
+            if not self.configured:
+                if self.configured.has.actual_batch_size and not self.configured.has.gas:
+                    return self.effective_batch_size // self.actual_batch_size
+                elif self.configured.has.gas and not self.configured.has.actual_batch_size:
+                    self._actual_batch_size = self.effective_batch_size // gas
+                return gas
+            else:
+                self._actual_batch_size = self.effective_batch_size // gas
+                return gas
+
+    generator = Generator(actual_batch_size=2)
+    assert generator.actual_batch_size == 2
+    assert generator.gas == 8
+    assert 'actual_batch_size' in generator.configured
+    assert 'gas' not in generator.configured
+    generator.actual_batch_size = 4
+    assert generator.actual_batch_size == 4
+    assert generator.gas == 4
+    generator.gas = 2
+    assert generator.actual_batch_size == 8
+    assert generator.gas == 2
+    assert 'actual_batch_size' in generator.configured
+    assert 'gas' in generator.configured
+
+
+
+
+
 
 
 

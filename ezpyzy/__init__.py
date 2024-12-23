@@ -11,7 +11,7 @@ from ezpyzy.batch import batching, batched
 from ezpyzy.bind import bind
 from ezpyzy.cache import cache
 from ezpyzy.cat import cat
-from ezpyzy.config import Config, ImmutableConfig, default
+from ezpyzy.config import Config, MultiConfig, ImmutableConfig, default, ImplementsConfig, construct_implementation_of
 from ezpyzy.test import test, Tests, Test, tests, test_groups
 from contextlib import nullcontext as collapsable # noqa
 from ezpyzy.debugging import debugging
@@ -23,6 +23,7 @@ from ezpyzy.format import Savable, Text, CSV, JSON, Bytes, Pickle, TSPy, Pyr, fo
 from ezpyzy.import_path import get_import_path, import_obj_from_path
 from ezpyzy.job_queue import JobQueue
 from ezpyzy.multiprocess import multiprocess
+from ezpyzy.get import op, get
 from ezpyzy.peek import peek
 from dataclasses import replace as copy # noqa
 from ezpyzy.scope import Scope
