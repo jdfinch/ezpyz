@@ -205,6 +205,7 @@ class Table(T.Generic[R]):
             first = other[0]
             if isinstance(first, (list, tuple)):
                 assert len(row_lens:={len(other_row) for other_row in other}) == 1, f"Error Message"
+                assert all(isinstance(other_row, (list, tuple)) for other_row in other), f"Error Message"
                 if len(self) == 0: self += len(other)
                 else: assert len(other) == len(self), f"Error Message"
                 num_cols, = row_lens
@@ -214,6 +215,7 @@ class Table(T.Generic[R]):
                     for col, value in zip(cols, other_row): setattr(self_row, col, value)
             elif isinstance(first, dict):
                 assert len(col_layouts:={frozenset(row) for row in other}) == 1, f"Error Message"
+                assert all(isinstance(other_row, dict) for other_row in other), f"Error Message"
                 cols, = col_layouts
                 assert all(col not in self.__cols__ for col in cols), f"Error Message"
                 for col in cols: self.__cols__[col] = None
@@ -231,6 +233,7 @@ class Table(T.Generic[R]):
                 for self_row, other_row in zip(self, other):
                     for col in cols: setattr(self_row, col, getattr(other_row, col))
             elif isinstance(first, Column):
+                assert all(isinstance(other_col, Column) for other_col in other), f"Error Message"
                 assert all(column.__name__ not in self.__cols__ for column in other), f"Error Message"
                 assert len(col_lens:={len(column) for column in other}) == 1, f"Error Message"
                 other_len, = col_lens
@@ -239,6 +242,7 @@ class Table(T.Generic[R]):
                 for column in other:
                     for row, value in zip(self, column): setattr(row, column.__name__, value)
             elif isinstance(first, str):
+                assert all(isinstance(other_col, str) for other_col in other), f"Error Message"
                 assert all(col not in self.__cols__ for col in other), f"Error Message"
                 for col in other: self.__cols__[col] = None
             elif first is None and list(other) == []:
@@ -249,9 +253,44 @@ class Table(T.Generic[R]):
 
     def __iadd__(self, other) -> R:
         if isinstance(other, self.__row_type__):
-            ...
+            self.__rows__.append(other)
+        elif isinstance(other, (Row, dict)):
+            self.__rows__.append(self.__row_type__())
+            self[-1] = other
         elif isinstance(other, Table):
-            ...
+            if issubclass(other.__row_type__, self.__row_type__):
+                self.__rows__.extend(other)
+            else:
+                original_len = len(self)
+                self.__iadd__(len(other))
+                self[original_len:] = other
+        else:
+            if not isinstance(other, list):
+                other = list(other)
+            if not other: return self # noqa
+            first = other[0]
+            if isinstance(first, Row):
+                assert all(isinstance(other_row, Row) for other_row in other), f"Error Message"
+                update_indices = []
+                update_rows = []
+                for i, other_row in enumerate(other):
+                    if isinstance(other_row, self.__row_type__):
+                        self.__rows__.append(other_row)
+                    else:
+                        self.__rows__.append(self.__row_type__())
+                        update_indices.append(i)
+                        update_rows.append(other_row)
+                if update_indices:
+                    self[update_indices] = update_rows
+            elif isinstance(first, dict):
+                assert all(isinstance(other_row, dict) for other_row in other), f"Error Message"
+                original_len = len(self)
+                self.__iadd__(len(other))
+                self[original_len:] = other
+            elif isinstance(first, (list, tuple)):
+                ...
+            else:
+                raise ValueError(f"Error Message")
 
         if self.__row_type__ and isinstance(other, self.__row_type__):
             self.__rows__.append(other)
@@ -393,6 +432,8 @@ if __name__ == '__main__':
 
     import dataclasses as dc
 
+    from ezpyzy.timer import Timer
+
 
     @dc.dataclass
     class Duck(Row):
@@ -402,6 +443,21 @@ if __name__ == '__main__':
 
         def quack(self) -> Col[str]:
             return f'{self.name} quack!'
+
+
+    ducks: T.Any = [None] * 1_000_000
+    other = []
+    with Timer('One million rows'):
+        for i in range(1_000_000):
+            d = Duck('donald', 42, ['don', 'quack'])
+            ducks[i] = d
+            other.append(i)
+
+
+    with Timer('Validate rows'):
+        assert all(isinstance(duck, Duck) for duck in ducks)
+
+
 
 
     def main():
