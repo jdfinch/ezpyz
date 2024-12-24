@@ -31,8 +31,8 @@ class Table(T.Generic[R]):
         self.__cols__: dict[str, Column[T.Any, R]]
         self.__row_type__: type[R]
         self.__origin__: R
-        self -= columns
         self += rows
+        self -= columns
 
     def __call__(self) -> 'TableAttrs[T.Self]':
         return self.__attrs__
@@ -165,13 +165,34 @@ class Table(T.Generic[R]):
                 return self.__class__(row for row, i in zip(self.__rows__, selection) if i)  # noqa
 
     def __setitem__(self, selection, data):
-        ...
+        if isinstance(selection, int):
+            if isinstance(data, self.__row_type__):
+                self.__rows__[selection] = data
+            else:
+                ...
+        elif isinstance(selection, slice):
+            ...
+        elif isinstance(selection, tuple):
+            ...
+        elif isinstance(selection, str):
+            ...
+        elif isinstance(selection, set):
+            ...
+        else:
+            if not isinstance(selection, list):
+                selection = list(selection)
+            first = selection[0]
+            if isinstance(first, int):
+                ...
+            elif isinstance(first, bool):
+                ...
+
 
     def __delitem__(self, selection):
         ...
 
     def __isub__(self, other) -> R:
-        """Add column data `other` into this Table"""
+        """Add new columns to this table using column data `other`"""
         if isinstance(other, Column):
             assert (col:=other.__name__) not in self.__cols__, f"Error Message"
             self.__cols__[col] = None
@@ -252,9 +273,10 @@ class Table(T.Generic[R]):
         return self # noqa
 
     def __iadd__(self, other) -> R:
+        """Add new rows to this table using row data `other`"""
         if isinstance(other, self.__row_type__):
             self.__rows__.append(other)
-        elif isinstance(other, (Row, dict)):
+        elif isinstance(other, Row):
             self.__rows__.append(self.__row_type__())
             self[-1] = other
         elif isinstance(other, Table):
@@ -264,6 +286,15 @@ class Table(T.Generic[R]):
                 original_len = len(self)
                 self.__iadd__(len(other))
                 self[original_len:] = other
+        elif isinstance(other, dict):
+            assert set(other) == set(self.__cols__), f"Error Message"
+            assert len(col_lens:={len(column) for column in other.values()}) == 1, f"Error Message"
+            original_len = len(self)
+            extension_len, = col_lens
+            self.__iadd__(extension_len)
+            self[original_len:] = other
+        elif isinstance(other, Column):
+            self.__iadd__([other])
         else:
             if not isinstance(other, list):
                 other = list(other)
@@ -282,41 +313,18 @@ class Table(T.Generic[R]):
                         update_rows.append(other_row)
                 if update_indices:
                     self[update_indices] = update_rows
-            elif isinstance(first, dict):
-                assert all(isinstance(other_row, dict) for other_row in other), f"Error Message"
+            elif isinstance(first, Column):
+                assert all(isinstance(other_col, Column) for other_col in other), f"Error Message"
+                assert {other_col.__name__ for other_col in other} == set(self.__cols__), f"Error Message"
+                assert len(col_lens:={len(other_col) for other_col in other}) == 1, f"Error Message"
+                extension_len, = col_lens
+                original_len = len(self)
+                self.__iadd__(extension_len)
+                self[original_len:] = other
+            else:
                 original_len = len(self)
                 self.__iadd__(len(other))
                 self[original_len:] = other
-            elif isinstance(first, (list, tuple)):
-                ...
-            else:
-                raise ValueError(f"Error Message")
-
-        if self.__row_type__ and isinstance(other, self.__row_type__):
-            self.__rows__.append(other)
-        elif not self.__row_type__:
-            self.__rows__.extend(other)
-        elif isinstance(other, dict):
-            rows = zip(*other.values())
-            self.__rows__.extend(self.__row_type__(**dict(zip(other, row))) for row in rows)
-        else:
-            if (iterator:=iter(other)) is iter(other):
-                first, other = peek(other)
-            else:
-                first = next(iterator)
-            if isinstance(first, self.__row_type__):
-                self.__rows__.extend(other)
-            elif isinstance(first, dict):
-                self.__rows__.extend(self.__row_type__(**row) for row in other)
-            elif isinstance(first, Column):
-                rows = zip(*other)
-                cols = (col.__name__ for col in other)
-                self.__rows__.extend(self.__row_type__(**dict(zip(cols, row))) for row in rows)
-            elif not hasattr(first, '__iter__'):
-                self.__rows__.extend(self.__row_type__(**{
-                    col: getattr(row, col, None) for col, row in zip(self.__cols__, other)}))
-            else:
-                self.__rows__.extend(self.__row_type__(**dict(zip(self.__cols__, row))) for row in other)
         return self # noqa
 
 
@@ -422,10 +430,38 @@ class Row(Table[T.Self], metaclass=RowMeta):
         setattr(self.__class__, item, None)
         return None
 
+    def __hash__(self):
+        return hash(id(self))
+
+    def __eq__(self, other):
+        return vars(self) == vars(other)
+
     def __pos__(self):
         return cp.deepcopy(self)
 
 Table.__row_type__ = Row
+
+"""
+Add Columns:
+table -= columns # set column data to existing rows in order as long as column does not already exist in table
+
+Add Rows:
+table += rows # add rows to table by reference if they are table.__row_cls__ 
+    (else create new Row objects by table.__row_cls__)
+
+Set data:
+table[row_select] = rows # will add rows by reference as long as rows are Row objects (else create with __row_cls__)
+table[row_select,:] = rows # will add row data to existing rows (only columns in table)
+table |= rows # will add ALL row data to existing rows by mutation
+
+Remove Columns:
+del table[columns] # columns as a tuple of Column or str
+
+Remove Rows:
+del table[rows]
+
+
+"""
 
 
 if __name__ == '__main__':
@@ -445,6 +481,7 @@ if __name__ == '__main__':
             return f'{self.name} quack!'
 
 
+
     ducks: T.Any = [None] * 1_000_000
     other = []
     with Timer('One million rows'):
@@ -461,27 +498,91 @@ if __name__ == '__main__':
 
 
     def main():
+
+        """
+        What should happen?
+            - reference or copies created?
+            - any error?
+            - what data is moved?
+        """
+
+        @dc.dataclass
+        class Duck(Row):
+            name: Col[str, Duck] = None
+            age: Col[int, Duck] = None
+            children: Col[list[str], Duck] = None
+
+            def quack(self) -> Col[str]:
+                return f'{self.name} quack!'
+
         ducks = Duck.s()
-        for duck in ducks:
-            duck.quack()
-        for children in ducks.children:
-            children.append('Donald')
 
         the_duck = Duck('Donald', 5, ['Huey', 'Dewey', 'Louie'])
+        ducks += the_duck
+        ''' add the_duck by reference '''
 
-        a_duck = ducks[2]
+        ducks += [Duck(name=name) for name in ['Huey', 'Dewey', 'Louie']]
+        ''' add each duck by reference '''
 
-        some_ducks = ducks.__getitem__(slice(1, 4))
-        duck_attrs = ducks[:]
-        more_ducks = ducks[:, :]
-        specific_ducks = ducks[all, 3, 2]
-        duck_column = ducks[ducks.name]
+        ducks += [dict(name=name) for name in ['Huey', 'Dewey', 'Louie']]
+        ''' create new ducks and put the new values in those rows '''
 
-        certain_ducks = (x := specific_ducks)[x.age, x.children, x.name]
+        ducks += [dict(wings=n) for n in (2, 2, 1)]
+        ''' error because wings is not a column in Duck.s '''
 
-        second_col = ducks()[1:2]
+        ducks += [dict() for _ in range(3)]
+        ''' create new empty ducks '''
 
-        names = ducks.name
-        ages = ducks.age
-        names_and_ages = names - ages
-        names_of_naa = names_and_ages.name
+        @dc.dataclass
+        class Elephant(Row):
+            pounds: int = 'fat'
+
+        ducks += Elephant(8392018)
+        ''' error Elephant is the wrong row type '''
+
+        ducks += Row(name='Rick') # noqa
+        ''' a Duck should be created and the data moved to that duck '''
+
+        # ducks is an existing table with 3 rows
+        ducks[1] = Duck(name='Brian')
+        ''' replace with reference '''
+
+        # ducks is an existing table with 3 rows
+        table2 = Duck.s([
+            ['Brain', 3, []],
+            ['Will', 2, []]
+        ])
+        ducks[1:3,'age':] = table2
+        '''  '''
+
+        # ducks is an existing table with 3 rows
+        ducks[:] = [Duck(name=name) for name in ['Huey', 'Dewey', 'Louie']]
+        ''' '''
+
+        # ducks is an existing table with 4 rows
+        ducks[:] = [Duck(name=name) for name in ['Huey', 'Dewey', 'Louie']]
+        ''' replace all 4 rows with the 3 ducks '''
+
+        # ducks is an existing table with 2 rows
+        ducks[:] = [Duck(name=name) for name in ['Huey', 'Dewey', 'Louie']]
+        ''' ducks has the new rows by reference and is now 3 rows '''
+
+        # ducks is an existing table with 2 rows
+        ducks[2:2] = [Duck(name=name) for name in ['Huey', 'Dewey', 'Louie']]
+        ''' allow slicing rows to insert rows of any number '''
+
+        # ducks is an existing table with 3 rows
+        ducks[:,'name'] = [Duck(name=name) for name in ['Huey', 'Dewey', 'Louie']]
+        ''' name cells replaced '''
+
+        # ducks is an existing table with 4 rows
+        ducks[:,'name'] = [Duck(name=name) for name in ['Huey', 'Dewey', 'Louie']]
+        ''' error, number of rows doesn't match number in slice with cell replacement '''
+
+        # ducks is an existing table with 3 rows
+        ducks[:,:] = [Duck(name=name) for name in ['Huey', 'Dewey', 'Louie']]
+        ''' '''
+
+        # ducks is an existing table with 3 rows
+        ducks[:,ducks.name,ducks.age] = [Duck(name=name, age=3) for name in ['Huey', 'Dewey', 'Louie']]
+        ''' '''
