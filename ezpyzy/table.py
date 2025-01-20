@@ -20,7 +20,7 @@ def iter_anonymous_columns(existing_columns):
 
 R = T.TypeVar('R', bound='Row')
 
-class Table(T.Generic[R]):
+class Tab(T.Generic[R]):
     __cols__ = None
     __row_type__ = None
     __attrs__ = None
@@ -30,7 +30,7 @@ class Table(T.Generic[R]):
         self.__rows__: list[R] = []
         self.__cols__: dict[str, Column[T.Any, R]]
         self.__row_type__: type[R]
-        self.__origin__: R
+        self.__origin__: R = self  # noqa
         self += rows
         self -= columns
 
@@ -109,84 +109,10 @@ class Table(T.Generic[R]):
             super().__delattr__(item)
 
     def __getitem__(self, selection) -> R:
-        if isinstance(selection, int):
-            return self.__rows__.__getitem__(selection)
-        elif isinstance(selection, slice):
-            return self.__class__(self.__rows__[selection]) # noqa
-        elif selection is ellipsis:
-            return self.__class__(self.__rows__) # noqa
-        elif isinstance(selection, tuple) and selection:
-            first = selection[0]
-            if isinstance(first, (Column, str)):
-                col_view = cp.copy(self)
-                if selection[-1] is Ellipsis:
-                    selected_cols = tuple(c.__name__ if isinstance(c, Column) else c for c in selection[:-1])
-                    rest_of_cols = tuple(col for col in self.__cols__ if col not in selected_cols)
-                    col_view.__cols__ = dict.fromkeys(selected_cols+rest_of_cols)
-                else:
-                    col_view.__cols__ = dict.fromkeys(c if isinstance(c, str) else c.__name__ for c in selection)
-                col_view.__attrs__ = None
-                return col_view # noqa
-            else:
-                col_selection = selection[1:]
-                if col_selection and isinstance(col_selection[0], (str, Column)):
-                    rows_view = self[first]
-                    return rows_view[col_selection]
-        elif isinstance(selection, Column):
-            col_view = cp.copy(self)
-            col_view.__cols__ = dict.fromkeys((selection.__name__,))
-            return col_view # noqa
-        elif isinstance(selection, (Table, TableAttrs)):
-            if isinstance(selection, TableAttrs):
-                selection = selection.table
-            col_view = cp.copy(self)
-            col_view.__cols__ = dict.fromkeys(selection.__cols__)
-            return col_view # noqa
-        elif callable(selection):
-            selection = [selection(row) for row in self.__rows__]
-        if not selection:
-            return self.__class__()  # noqa
-        if isinstance(selection, set):
-            return self.__class__(row for row in self.__rows__ if row in selection) # noqa
-        else:
-            if (iterator:=iter(selection)) is iter(selection):
-                first, selection = peek(selection)
-            else:
-                first = next(iterator)
-            if isinstance(first, bool):
-                assert len(selection) == len(self.__rows__), \
-                    f'Boolean selection must be same length as table. Got {len(selection) = } and {len(self) = }'
-                return self.__class__(row for row, i in zip(self.__rows__, selection) if i) # noqa
-            if isinstance(first, int):
-                return self.__class__(self.__rows__[i] for i in selection) # noqa
-            else:
-                assert len(selection) == len(self.__rows__), \
-                    f'Boolean selection must be same length as table. Got {len(selection) = } and {len(self) = }'
-                return self.__class__(row for row, i in zip(self.__rows__, selection) if i)  # noqa
+        return Table.select(self, selection)
 
     def __setitem__(self, selection, data):
-        if isinstance(selection, int):
-            if isinstance(data, self.__row_type__):
-                self.__rows__[selection] = data
-            else:
-                ...
-        elif isinstance(selection, slice):
-            ...
-        elif isinstance(selection, tuple):
-            ...
-        elif isinstance(selection, str):
-            ...
-        elif isinstance(selection, set):
-            ...
-        else:
-            if not isinstance(selection, list):
-                selection = list(selection)
-            first = selection[0]
-            if isinstance(first, int):
-                ...
-            elif isinstance(first, bool):
-                ...
-
+        return Table.replace(self, selection, data)
 
     def __delitem__(self, selection):
         ...
@@ -440,6 +366,9 @@ class Row(Table[T.Self], metaclass=RowMeta):
         return cp.deepcopy(self)
 
 Table.__row_type__ = Row
+
+
+from ezpyzy.table_companion import *
 
 """
 Add Columns:
